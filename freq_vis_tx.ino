@@ -178,7 +178,7 @@ void send_freq_peaks( void )
   int i;
   int freq_point;
 
-  // Serial.println("Sending freq data:");
+  Serial.println("Sending freq data:");
   
   XBee.print("s");
   for (i=0; i<FREQ_BINS; i++)
@@ -186,15 +186,17 @@ void send_freq_peaks( void )
     freq_point = freq_hist[i];
     
     XBee.print((char) freq_point);
-    // Serial.println( (int) freq_point);
+    Serial.println( (int) freq_point);
   }
 
-  // Serial.println("===========");
+  Serial.println("===========");
 }
 
 state_type process_first_wait( void )
 {
   char c;
+
+  Serial.println("process_first_wait");
   
   // In this state, we're just waiting for a "go" from the RX side.
   while (XBee.available())
@@ -203,6 +205,9 @@ state_type process_first_wait( void )
 
     if (c == GO_CHAR)
     {
+
+      Serial.println("Got a go!!!");
+      
       // collect one buffer worth of samples
       collect_samples();
 
@@ -228,6 +233,8 @@ state_type process_first_wait( void )
 state_type process_peak_collect( void )
 { 
   char c;
+
+  Serial.println("Process peak collect");
   
   // Kick off a measurement
   collect_samples();
