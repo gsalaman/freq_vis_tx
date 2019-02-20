@@ -2,13 +2,14 @@
 // We use pin A5 to listen, and transmit an array of 21 output frequency values.
 // Transmit the values via xbee.
 // s indicates a start
+// collect peaks before transmitting....means we're grabbing several frames of freq data
 
 #include "SoftwareSerial.h"
 SoftwareSerial XBee(2,3);
 
 // FHT defines.  This library defines an input buffer for us called fht_input of signed integers.  
 #define LIN_OUT 1
-#define FHT_N   64
+#define FHT_N   256
 #include <FHT.h>
 
 // These are the raw samples from the audio input.
@@ -23,6 +24,19 @@ int sample[SAMPLE_SIZE] = {0};
 #define FREQ_BINS 21
 
 #define BIT_BANG_ADC
+
+int freq_peaks[FREQ_BINS] = {0};
+#define NUM_FREQ_ITERATIONS 4 
+
+void clear_freq_peaks( void )
+{
+  int i;
+
+  for (i = 0; i < FREQ_BINS; i++)
+  {
+    freq_peaks[i] = 0;
+  }
+}
 
 void setupADC( void )
 {
@@ -58,23 +72,6 @@ void collect_samples( void )
   }  
 }
 
-int calc_dc_bias( void )
-{
-  int i;
-  unsigned long total=0;
-  unsigned long dc_bias;
-
-  for (i = 0; i < SAMPLE_SIZE; i++)
-  {
-    total = total + sample[i];
-  }
-
-  dc_bias = total / SAMPLE_SIZE;
-
-  if (dc_bias > 1023) Serial.println("*****  DC BIAS OVERFLOW!!!!  *****");
-
-  return dc_bias;
-}
 
 // This function does the FHT to convert the time-based samples (in the sample[] array)
 // to frequency bins.  The FHT library defines an array (fht_input[]) where we put our 
@@ -89,29 +86,6 @@ void doFHT( void )
   {
     // Remove DC bias
     temp_sample = sample[i] - SAMPLE_BIAS;
-
-    // Load the sample into the input array
-    fht_input[i] = temp_sample;
-    
-  }
-  
-  fht_window();
-  fht_reorder();
-  fht_run();
-
-  // Their lin mag functons corrupt memory!!!  
-  //fht_mag_lin();  
-}
-
-void glenn_dc_bias_FHT( int dc_bias )
-{
-  int i;
-  int temp_sample;
-  
-  for (i=0; i < SAMPLE_SIZE; i++)
-  {
-    // Remove DC bias
-    temp_sample = sample[i] - dc_bias;
 
     // Load the sample into the input array
     fht_input[i] = temp_sample;
@@ -162,7 +136,7 @@ void setup()
 
   Serial.begin(9600);
 
-  XBee.begin(115200);
+  XBee.begin(38400);
 
   #ifdef BIT_BANG_ADC
   setupADC();
@@ -170,36 +144,53 @@ void setup()
   
 }
 
+void update_freq_peaks( void )
+{
+  int freq_point;
+  int i;
+  
+  // Assumes we've just done an FHT.
+  for (i = 0; i < FREQ_BINS; i++)
+  {
+    freq_point = glenn_mag_calc(i);
+    freq_point = constrain(freq_point, 0, 31);
+
+    if (freq_point > freq_peaks[i]) freq_peaks[i] = freq_point;
+  }
+}
+
 void send_freq_data( void )
 {
   int i;
   int freq_point;
 
-  // Serial.println("Sending freq data:");
+  //Serial.println("Sending freq data:");
   
   XBee.print("s");
   for (i=0; i<FREQ_BINS; i++)
   {
-    freq_point = glenn_mag_calc(i);
-    freq_point = constrain(freq_point,0,31);
-
+    freq_point = freq_peaks[i];
     XBee.print((char) freq_point);
-    Serial.println( (int) freq_point);
+    
+    //Serial.println( (int) freq_point);
   }
 
-  // Serial.println("===========");
+  //Serial.println("===========");
 }
 
 void loop() 
 {
+  int i;
 
-  collect_samples();
-
-  // do the FHT to populate our frequency array
-  doFHT();
+  for (i = 0; i < NUM_FREQ_ITERATIONS; i++)
+  {
+    collect_samples();
+    doFHT();
+    update_freq_peaks();
+  }
   
-  // and send the samples across the xbee.
+  // send the samples across to the rx side.
   send_freq_data();
 
-  
+  clear_freq_peaks();
 }
