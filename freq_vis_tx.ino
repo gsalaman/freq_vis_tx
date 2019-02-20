@@ -165,7 +165,7 @@ void setup()
 
   Serial.begin(9600);
 
-  XBee.begin(9600);
+  XBee.begin(115200);
 
   #ifdef BIT_BANG_ADC
   setupADC();
