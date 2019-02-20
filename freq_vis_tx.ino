@@ -1,8 +1,7 @@
 // this is the transmit module for the frequency visualizer.
-// We use pin A5 to listen, and transmit an array of 32 output frequency values.
+// We use pin A5 to listen, and transmit an array of 21 output frequency values.
 // Transmit the values via xbee.
 // s indicates a start
-// x indicates a stop.
 
 #include "SoftwareSerial.h"
 SoftwareSerial XBee(2,3);
@@ -12,9 +11,6 @@ SoftwareSerial XBee(2,3);
 #define FHT_N   64
 #include <FHT.h>
 
-//  We're using A5 as our audio input pin.
-#define AUDIO_PIN A5
-
 // These are the raw samples from the audio input.
 #define SAMPLE_SIZE FHT_N
 int sample[SAMPLE_SIZE] = {0};
@@ -22,10 +18,11 @@ int sample[SAMPLE_SIZE] = {0};
 //  Audio samples from the ADC are "centered" around 2.5v, which maps to 512 on the ADC.
 #define SAMPLE_BIAS 512
 
-// We have half the number of frequency bins as samples.
-#define FREQ_BINS (SAMPLE_SIZE/2)
+// With 64 samples, the FHT returns 32 frequency bins.
+// I'm only going to send 21
+#define FREQ_BINS 21
 
-//#define BIT_BANG_ADC
+#define BIT_BANG_ADC
 
 void setupADC( void )
 {
@@ -36,7 +33,7 @@ void setupADC( void )
    // Prescalar of 64 gives ~20 KHz sample rate (10 KHz range)    mask: 110    
    // Prescalar of 32 gives ~40 KHz sample rate (20 KHz range)    mask: 101
    
-    ADCSRA = 0b11100111;      // Upper bits set ADC to free-running mode.
+    ADCSRA = 0b11100110;      // Upper bits set ADC to free-running mode.
 
     // A5, internal reference.
     ADMUX =  0b00000101;
@@ -178,7 +175,7 @@ void send_freq_data( void )
   int i;
   int freq_point;
 
-  Serial.println("Sending freq data:");
+  // Serial.println("Sending freq data:");
   
   XBee.print("s");
   for (i=0; i<FREQ_BINS; i++)
@@ -190,7 +187,7 @@ void send_freq_data( void )
     Serial.println( (int) freq_point);
   }
 
-  Serial.println("===========");
+  // Serial.println("===========");
 }
 
 void loop() 
@@ -200,7 +197,6 @@ void loop()
 
   // do the FHT to populate our frequency array
   doFHT();
-
   
   // and send the samples across the xbee.
   send_freq_data();
