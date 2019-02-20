@@ -1,7 +1,11 @@
 // this is the transmit module for the frequency visualizer.
 // We use pin A5 to listen, and transmit an array of 21 output frequency values.
-// Transmit the values via xbee.
-// s indicates a start
+// Transmit the values via xbee eventually.  Right now I'm faking with software serial.
+// s indicates a start of packet (tx-> rx), followed by 21 characters of data....0-31.
+// g is "go" (rx->tx), meaning send what you've got.
+
+#define START_PACKET_CHAR 's'
+#define GO_CHAR           'g'
 
 #include "SoftwareSerial.h"
 SoftwareSerial XBee(2,3);
@@ -22,7 +26,18 @@ int sample[SAMPLE_SIZE] = {0};
 // I'm only going to send 21
 #define FREQ_BINS 21
 
+// buffer for storing history.  Right now, we're doing "peaks".
+int freq_hist[FREQ_BINS]={0};
+
 #define BIT_BANG_ADC
+
+typedef enum
+{
+  STATE_FIRST_WAIT,
+  STATE_PEAK_COLLECT
+} state_type;
+
+state_type current_state=STATE_FIRST_WAIT;
 
 void setupADC( void )
 {
@@ -58,24 +73,6 @@ void collect_samples( void )
   }  
 }
 
-int calc_dc_bias( void )
-{
-  int i;
-  unsigned long total=0;
-  unsigned long dc_bias;
-
-  for (i = 0; i < SAMPLE_SIZE; i++)
-  {
-    total = total + sample[i];
-  }
-
-  dc_bias = total / SAMPLE_SIZE;
-
-  if (dc_bias > 1023) Serial.println("*****  DC BIAS OVERFLOW!!!!  *****");
-
-  return dc_bias;
-}
-
 // This function does the FHT to convert the time-based samples (in the sample[] array)
 // to frequency bins.  The FHT library defines an array (fht_input[]) where we put our 
 // input values.  After doing it's processing, fht_input will contain raw output values...
@@ -102,30 +99,6 @@ void doFHT( void )
   // Their lin mag functons corrupt memory!!!  
   //fht_mag_lin();  
 }
-
-void glenn_dc_bias_FHT( int dc_bias )
-{
-  int i;
-  int temp_sample;
-  
-  for (i=0; i < SAMPLE_SIZE; i++)
-  {
-    // Remove DC bias
-    temp_sample = sample[i] - dc_bias;
-
-    // Load the sample into the input array
-    fht_input[i] = temp_sample;
-    
-  }
-  
-  fht_window();
-  fht_reorder();
-  fht_run();
-
-  // Their lin mag functons corrupt memory!!!  
-  //fht_mag_lin();  
-}
-
 
 // Since it looks like fht_mag_lin is corrupting memory.  Instead of debugging AVR assembly, 
 // I'm gonna code my own C version.  
@@ -157,6 +130,36 @@ int glenn_mag_calc(int bin)
 
 }
 
+void clear_freq_peaks( void )
+{
+  int i;
+
+  for (i=0; i<FREQ_BINS; i++)
+  {
+    freq_hist[i]=0;
+  }
+}
+
+void update_freq_peaks( void )
+{
+  int i;
+  int freq_point;
+
+  for (i=0; i<FREQ_BINS; i++)
+  {
+    // What's the current frequency value?
+    freq_point = glenn_mag_calc(i);
+    freq_point = constrain(freq_point,0,31);
+
+    // is it bigger than our current largest?
+    if (freq_point > freq_hist[i])
+    {
+      freq_hist[i] = freq_point;
+    }
+  }
+  
+}
+
 void setup() 
 {
 
@@ -170,7 +173,7 @@ void setup()
   
 }
 
-void send_freq_data( void )
+void send_freq_peaks( void )
 {
   int i;
   int freq_point;
@@ -180,26 +183,88 @@ void send_freq_data( void )
   XBee.print("s");
   for (i=0; i<FREQ_BINS; i++)
   {
-    freq_point = glenn_mag_calc(i);
-    freq_point = constrain(freq_point,0,31);
-
+    freq_point = freq_hist[i];
+    
     XBee.print((char) freq_point);
-    Serial.println( (int) freq_point);
+    // Serial.println( (int) freq_point);
   }
 
   // Serial.println("===========");
 }
 
+state_type process_first_wait( void )
+{
+  char c;
+  
+  // In this state, we're just waiting for a "go" from the RX side.
+  while (XBee.available())
+  {
+    c = XBee.read();
+
+    if (c == GO_CHAR)
+    {
+      // collect one buffer worth of samples
+      collect_samples();
+
+      // do the FHT
+      doFHT();
+
+      update_freq_peaks();
+
+      // ...and send to the other side
+      send_freq_peaks();
+
+      // and now clear it so we start fresh for the next measurement.
+      clear_freq_peaks();
+
+      return STATE_PEAK_COLLECT;
+    }
+    
+  }
+
+  return STATE_FIRST_WAIT;
+}
+
+state_type process_peak_collect( void )
+{ 
+  char c;
+  
+  // Kick off a measurement
+  collect_samples();
+  doFHT();
+  update_freq_peaks();
+
+  // is the other side ready for a measurement?
+  while (XBee.available())
+  {
+    c == XBee.read();
+    if (c == GO_CHAR)
+    {
+      send_freq_peaks();
+      clear_freq_peaks();
+    }
+  }
+
+  return STATE_PEAK_COLLECT;  
+}
+
 void loop() 
 {
-
-  collect_samples();
-
-  // do the FHT to populate our frequency array
-  doFHT();
+  state_type next_state;
   
-  // and send the samples across the xbee.
-  send_freq_data();
+  switch (current_state)
+  {
+    case STATE_FIRST_WAIT:
+      next_state = process_first_wait();
+    break;
 
-  
+    case STATE_PEAK_COLLECT:
+      next_state = process_peak_collect();
+    break;
+
+    default:
+      Serial.println("*****  UNKNOWN STATE!!!");
+  }
+
+  current_state = next_state;
 }
