@@ -9,7 +9,7 @@ SoftwareSerial XBee(2,3);
 
 // FHT defines.  This library defines an input buffer for us called fht_input of signed integers.  
 #define LIN_OUT 1
-#define FHT_N   256
+#define FHT_N   128
 #include <FHT.h>
 
 // These are the raw samples from the audio input.
@@ -26,7 +26,7 @@ int sample[SAMPLE_SIZE] = {0};
 #define BIT_BANG_ADC
 
 int freq_peaks[FREQ_BINS] = {0};
-#define NUM_FREQ_ITERATIONS 4 
+#define NUM_FREQ_ITERATIONS 7 
 
 void clear_freq_peaks( void )
 {
